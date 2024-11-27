@@ -1,0 +1,21 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL") // Update `.env` file with PostgreSQL connection string
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id         String   @id @default(uuid())
+  email      String   @unique
+  password   String?
+  name       String?
+  provider   String   @default("email")
+  providerId String?
+  role       String   @default("peserta")
+  createdAt  DateTime @default(now())
+
+  @@map("users") // Map this model to the "users" table in the database
+}
