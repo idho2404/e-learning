@@ -1,91 +1,109 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { RegisterDto } from './dto/register.dto';
 import * as bcrypt from 'bcryptjs';
-import { JwtService } from '@nestjs/jwt';
+import * as jwt from 'jsonwebtoken';
+import { JwtPayload } from './interface/jwt-payload.interface';
+import { GoogleProfile } from './interface/google-profile.interface';
 
 @Injectable()
 export class AuthService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly jwtService: JwtService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  async register(
-    email: string,
-    password: string,
-    name?: string,
-    role = 'peserta',
-  ) {
-    const existingUser = await this.prisma.user.findUnique({
+  async register(registerDto: RegisterDto) {
+    const { first_name, last_name, email, password } = registerDto;
+
+    // Check if the email already exists
+    const userExists = await this.prisma.user.findUnique({
       where: { email },
     });
 
-    if (existingUser) {
-      // Email sudah terdaftar
-      throw new BadRequestException('Email sudah terdaftar.');
+    if (userExists) {
+      throw new Error('email telah terdaftar');
     }
 
-    const hashedPassword = password ? await bcrypt.hash(password, 10) : null;
-    return this.prisma.user.create({
-      data: { email, password: hashedPassword, name, role },
+    // Hash the password before saving it to the database
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Create the user in the database
+    await this.prisma.user.create({
+      data: {
+        first_name,
+        last_name,
+        email,
+        password: hashedPassword,
+      },
     });
+
+    return {
+      status: 'Created',
+      message: 'Registrasi berhasil',
+    };
   }
 
   async loginWithEmail(email: string, password: string) {
+    // Check if user exists
     const user = await this.prisma.user.findUnique({ where: { email } });
-
     if (!user) {
-      // Email tidak ditemukan
-      throw new BadRequestException('Email tidak terdaftar.');
+      throw new Error('Invalid email or password');
     }
 
-    if (!user.password) {
-      // Password belum diatur
-      throw new BadRequestException(
-        'Password belum diatur. Silakan login menggunakan akun Google.',
-      );
+    // Verify password
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      throw new Error('Invalid email or password');
     }
 
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) {
-      // Password salah
-      throw new BadRequestException('Password yang Anda masukkan salah.');
-    }
+    // Generate JWT token
+    const payload: JwtPayload = {
+      email: user.email,
+      role: user.role,
+    };
 
-    return this.generateJwtToken(user);
+    const jwtToken = jwt.sign(payload, process.env.SECRET_KEY, {
+      expiresIn: '1h',
+    });
+
+    return {
+      email: user.email,
+      name: user.first_name + ' ' + user.last_name,
+      role: user.role,
+      jwt: jwtToken,
+    };
   }
 
-  async loginWithGoogle(profile: {
-    email: string;
-    name: string;
-    providerId: string;
-  }) {
+  async loginWithGoogle(profile: GoogleProfile) {
+    // Check if user exists, if not create a new one
     let user = await this.prisma.user.findUnique({
       where: { email: profile.email },
     });
 
     if (!user) {
-      // Jika user belum terdaftar, buat akun baru
       user = await this.prisma.user.create({
         data: {
           email: profile.email,
-          name: profile.name,
-          provider: 'google',
-          providerId: profile.providerId,
+          first_name: profile.firstName,
+          last_name: profile.lastName,
+          role: 'SISWA', // Default role, you can modify this
         },
       });
     }
 
-    return this.generateJwtToken(user);
-  }
-
-  private generateJwtToken(user: any) {
-    const payload = {
-      id: user.id,
+    // Generate JWT token
+    const payload: JwtPayload = {
       email: user.email,
-      name: user.name,
       role: user.role,
     };
-    return { access_token: this.jwtService.sign(payload) };
+
+    const jwtToken = jwt.sign(payload, process.env.SECRET_KEY, {
+      expiresIn: '1h',
+    });
+
+    return {
+      email: user.email,
+      name: user.first_name + ' ' + user.last_name,
+      role: user.role,
+      jwt: jwtToken,
+    };
   }
 }

@@ -1,62 +1,42 @@
-import {
-  Controller,
-  Post,
-  Body,
-  Req,
-  UseGuards,
-  Get,
-  HttpException,
-  HttpStatus,
-} from '@nestjs/common';
+import { Controller, Post, Body, Get, Req, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { GoogleAuthGuard } from '../auth/guards/google-auth.guard';
+import { RegisterDto } from './dto/register.dto';
+import { LoginDto } from './dto/login.dto';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { GoogleAuthGuard } from './guards/google-auth.guard';
+import { AuthGuard } from '@nestjs/passport';
 
-@Controller('auth')
+@Controller('/api/auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('register')
-  async register(
-    @Body()
-    body: {
-      email: string;
-      password?: string;
-      name?: string;
-      role?: string;
-    },
-  ) {
-    try {
-      return await this.authService.register(
-        body.email,
-        body.password,
-        body.name,
-        body.role,
-      );
-    } catch (error) {
-      throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
-    }
+  async register(@Body() registerDto: RegisterDto) {
+    return await this.authService.register(registerDto);
   }
 
   @Post('login')
-  async login(@Body() body: { email: string; password: string }) {
-    try {
-      return await this.authService.loginWithEmail(body.email, body.password);
-    } catch (error) {
-      throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
-    }
+  async login(@Body() loginDto: LoginDto) {
+    const { email, password } = loginDto;
+    return this.authService.loginWithEmail(email, password);
   }
 
   @Get('google')
-  @UseGuards(GoogleAuthGuard)
-  googleAuth() {}
+  @UseGuards(AuthGuard('google')) // Initiates Google authentication
+  async googleLogin() {
+    // This route just triggers Google OAuth flow.
+  }
 
   @Get('google/redirect')
-  @UseGuards(GoogleAuthGuard)
-  async googleCallback(@Req() req) {
-    try {
-      return await this.authService.loginWithGoogle(req.user);
-    } catch (error) {
-      throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
-    }
+  @UseGuards(GoogleAuthGuard) // Use GoogleAuthGuard to protect callback
+  async googleLoginCallback(@Req() req) {
+    const profile = req.user;
+    return this.authService.loginWithGoogle(profile);
+  }
+
+  @Get('profile')
+  @UseGuards(JwtAuthGuard)
+  getProfile(@Req() req) {
+    return req.user; // Returns user info from JWT token
   }
 }
